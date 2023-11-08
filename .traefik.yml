@@ -1,0 +1,10 @@
+displayName: DIN RPC Provider
+type: provider
+iconPath: .assets/icon.png
+
+import: github.com/openrelayxyz/din-plugins/provider
+
+summary: 'DIN RPC Provider Plugin'
+
+testData:
+  pollInterval: 5s
