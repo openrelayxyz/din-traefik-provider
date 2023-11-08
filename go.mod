@@ -1,4 +1,4 @@
-module github.com/traefik/pluginproviderdemo
+module github.com/openrelayxyz/din-traefik-provider
 
 go 1.19
 
