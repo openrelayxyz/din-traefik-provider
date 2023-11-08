@@ -2,7 +2,7 @@ displayName: DIN RPC Provider
 type: provider
 iconPath: .assets/icon.png
 
-import: github.com/openrelayxyz/din-plugins/provider
+import: github.com/openrelayxyz/din-traefik-provider
 
 summary: 'DIN RPC Provider Plugin'
 
