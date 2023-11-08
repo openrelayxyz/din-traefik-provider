@@ -1,5 +1,5 @@
 // Package pluginproviderdemo contains a demo of the provider's plugin.
-package pluginproviderdemo
+package din_traefik_provider
 
 import (
 	"context"
