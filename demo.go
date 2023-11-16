@@ -22,16 +22,15 @@ type CConfig struct {
 }
 
 type Config struct {
-	Networks map[string]CConfig `json:"networks"`
+	Services map[string]CConfig `json:"services"`
 }
 
 type ServiceProvider struct {
 	URL string `json:"url"`
 	WSURL string `json:"wsurl"`
-	Methods []RPCMethod `json:"methods"`
 	Archive bool `json:"archive"`
 	latestBlock int64
-	chain string
+	service string
 }
 
 type newHeadsMessage struct {
@@ -51,7 +50,7 @@ type RPCMethod struct {
 // CreateConfig creates the default plugin configuration.
 func CreateConfig() *Config {
 	return &Config{
-		Networks: make(map[string]CConfig),
+		Services: make(map[string]CConfig),
 	}
 }
 
@@ -59,7 +58,7 @@ func CreateConfig() *Config {
 type Provider struct {
 	name    string
 	methods map[string][]RPCMethod
-	serviceProvider map[string]map[string][]*ServiceProvider
+	serviceProvider map[string][]*ServiceProvider
 	blockNumCh chan cBN
 
 	cancel  func()
@@ -92,12 +91,12 @@ func Serve(ctx context.Context, providers []*ServiceProvider, port int64, blockN
 				return
 			}
 			providers[idx].latestBlock = v
-			if v > max[providers[idx].chain] {
-				max[providers[idx].chain] = v
+			if v > max[providers[idx].service] {
+				max[providers[idx].service] = v
 			}
 		}
-		for chain, v := range max {
-			blockNumCh <- cBN{chain, v}
+		for service, v := range max {
+			blockNumCh <- cBN{service, v}
 		}
 		w.Write([]byte(`{"ok": true}`))
 	})
@@ -106,34 +105,29 @@ func Serve(ctx context.Context, providers []*ServiceProvider, port int64, blockN
 }
 
 type cBN struct {
-	chain string
+	service string
 	bn int64
 }
 
 // New creates a new Provider plugin.
 func New(ctx context.Context, ccConfig *Config, name string) (*Provider, error) {
-	sp := make(map[string]map[string][]*ServiceProvider)
+	sp := make(map[string][]*ServiceProvider)
 	methods := make(map[string][]RPCMethod)
 	providers := []*ServiceProvider{}
 	cBNCh := make(chan cBN)
-	for chain, config := range ccConfig.Networks {
-		sp[chain] = make(map[string][]*ServiceProvider)
+	for service, config := range ccConfig.Services {
+		sp[service] = make([]*ServiceProvider, len(config.Providers))
 		providers = append(providers, config.Providers...)
-		methods[chain] = config.Methods
+		methods[service] = config.Methods
 		
-		for _, provider := range config.Providers {
-			log.Printf("Provider: '%v' | '%v'", provider.URL, provider.Methods)
-			provider.chain = chain
-			for _, m := range provider.Methods {
-				if _, ok := sp[chain][m.Name]; !ok {
-					sp[chain][m.Name] = []*ServiceProvider{}
-				}
-				sp[chain][m.Name] = append(sp[chain][m.Name], provider)
-			}
+		for i, provider := range config.Providers {
+			// log.Printf("Provider: '%v' | '%v'", provider.URL, provider.Methods)
+			provider.service = service
+			sp[service][i] = provider
 		}
 	}
 	go Serve(ctx, providers, 7777, cBNCh)
-	log.Printf("SP: %v", sp["eth"]["web3_clientVersion"])
+	// log.Printf("SP: %v", sp["eth"]["web3_clientVersion"])
 	return &Provider{
 		name:         name,
 		methods: methods,
@@ -171,8 +165,8 @@ func (p *Provider) loadConfiguration(ctx context.Context, cfgChan chan<- json.Ma
 	for {
 		select {
 		case block := <-p.blockNumCh:
-			if block.bn >= bn[block.chain] {
-				bn[block.chain] = block.bn
+			if block.bn >= bn[block.service] {
+				bn[block.service] = block.bn
 				configuration := p.generateConfiguration(bn)
 				x, _ := json.Marshal(configuration)
 				log.Printf("Config: %v", string(x))
@@ -208,12 +202,12 @@ func(p *Provider) generateConfiguration(bn map[string]int64) *dynamic.Configurat
 
 	// methods map[string][]RPCMethod
 	// serviceProvider map[string]map[string][]*ServiceProvider
-	for chain, methods := range p.methods {
-		loopback := fmt.Sprintf("%vloopback", chain)
+	for service, methods := range p.methods {
+		loopback := fmt.Sprintf("%vloopback", service)
 		configuration.HTTP.Routers[loopback] = &dynamic.Router{
 			EntryPoints: []string{"web"},
 			Service:     loopback,
-			Rule:        fmt.Sprintf("Path(`/%v`)", chain),
+			Rule:        fmt.Sprintf("Path(`/%v`)", service),
 			Priority: 1,
 			Middlewares: []string{"rpcloopback"},
 		}
@@ -229,31 +223,29 @@ func(p *Provider) generateConfiguration(bn map[string]int64) *dynamic.Configurat
 				PassHostHeader: boolPtr(true),
 			},
 		}
-	
+		servers := []dynamic.Server{}
+		for _, sp := range p.serviceProvider[service] {
+			if sp.latestBlock >= bn[service] {
+				servers = append(servers, dynamic.Server{URL: sp.URL})
+			}
+		}
+		if len(servers) == 0 {
+			log.Printf("Warning: service %v has no health providers. Balancing across all.",  service)
+			for _, sp := range p.serviceProvider[service] {
+				servers = append(servers, dynamic.Server{URL: sp.URL})
+			}
+		}
 		for _, method := range methods {
-			servers := []dynamic.Server{}
-			for _, sp := range p.serviceProvider[chain][method.Name] {
-				log.Printf("Method: %v, SP: %v, Chain: %v", method.Name, sp.URL, chain)
-				if sp.latestBlock >= bn[chain] {
-					servers = append(servers, dynamic.Server{URL: sp.URL})
-				}
-			}
-			if len(servers) == 0 {
-				log.Printf("Warning: method %v has no health providers. Balancing across all.",  method.Name)
-				for _, sp := range p.serviceProvider[chain][method.Name] {
-					servers = append(servers, dynamic.Server{URL: sp.URL})
-				}
-			}
-			configuration.HTTP.Services[fmt.Sprintf("%v%v", chain, method.Name)] = &dynamic.Service{
+			configuration.HTTP.Services[fmt.Sprintf("%v%v", service, method.Name)] = &dynamic.Service{
 				LoadBalancer: &dynamic.ServersLoadBalancer{
 					PassHostHeader: boolPtr(false),
 					Servers: servers,
 				},
 			}
-			path := fmt.Sprintf("/%v/", chain) + strings.Join(strings.Split(method.Name, "_"), "/")
-			configuration.HTTP.Routers[fmt.Sprintf("%v%v", chain, method.Name)] = &dynamic.Router{
+			path := fmt.Sprintf("/%v/", service) + strings.Join(strings.Split(method.Name, "_"), "/")
+			configuration.HTTP.Routers[fmt.Sprintf("%v%v", service, method.Name)] = &dynamic.Router{
 				EntryPoints: []string{"web"},
-				Service:     fmt.Sprintf("%v%v", chain, method.Name),
+				Service:     fmt.Sprintf("%v%v", service, method.Name),
 				Rule:        fmt.Sprintf("PathPrefix(`%v`)", path),
 				Priority: 2,
 			}

@@ -1,4 +1,4 @@
-package pluginproviderdemo_test
+package din_traefik_provider_test
 
 import (
 	"bytes"
