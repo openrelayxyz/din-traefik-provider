@@ -199,6 +199,9 @@ func(p *Provider) generateConfiguration(bn map[string]int64) *dynamic.Configurat
 		Plugin: make(map[string]dynamic.PluginConf),
 	}
 	configuration.HTTP.Middlewares["rpcloopback"].Plugin["rpcloopback"] = dynamic.PluginConf{}
+	configuration.HTTP.ServersTransports["default"] = &dynamic.ServersTransport{
+		DisableHTTP2: true,
+	}
 
 	// methods map[string][]RPCMethod
 	// serviceProvider map[string]map[string][]*ServiceProvider
@@ -221,6 +224,7 @@ func(p *Provider) generateConfiguration(bn map[string]int64) *dynamic.Configurat
 					},
 				},
 				PassHostHeader: boolPtr(true),
+				ServersTransport: "default",
 			},
 		}
 		servers := []dynamic.Server{}
@@ -240,6 +244,7 @@ func(p *Provider) generateConfiguration(bn map[string]int64) *dynamic.Configurat
 				LoadBalancer: &dynamic.ServersLoadBalancer{
 					PassHostHeader: boolPtr(false),
 					Servers: servers,
+					ServersTransport: "default",
 				},
 			}
 			path := fmt.Sprintf("/%v/", service) + strings.Join(strings.Split(method.Name, "_"), "/")
