@@ -245,6 +245,7 @@ func(p *Provider) generateConfiguration(bn map[string]int64) *dynamic.Configurat
 					PassHostHeader: boolPtr(false),
 					Servers: servers,
 					ServersTransport: "default",
+					Sticky: &dynamic.Sticky{&dynamic.Cookie{}},
 				},
 			}
 			path := fmt.Sprintf("/%v/", service) + strings.Join(strings.Split(method.Name, "_"), "/")
